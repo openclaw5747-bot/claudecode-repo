@@ -11,13 +11,17 @@ compatibility_date = "2025-09-01"
 binding = "STATE"
 id = "REPLACE_WITH_KV_NAMESPACE_ID"
 
+# Workers AI (free daily allowance), used to rewrite posts for X.
+[ai]
+binding = "AI"
+
 [vars]
-PUBLISH_AT = "next-free-slot"   # or "now", or "" to only save drafts
-TAG = "auto-repurposed"         # Typefully tag on created X drafts; "" for none
-REPURPOSER = "http"
-REPURPOSER_URL = ""             # set once the repurposing service is chosen
-REPURPOSER_RESPONSE_FIELD = "text"
+BUFFER_CHANNEL_ID = ""          # your X channel in Buffer: run `npm run buffer:channels`
+BUFFER_MODE = "addToQueue"      # next slot in your Buffer posting schedule
+REPURPOSERS = "workersai"       # tried in order; becomes "creatorbuddy,workersai" once wired up
+AI_MODEL = "@cf/meta/llama-3.1-8b-instruct"
+X_MAX_CHARS = "280"             # raise if your X account has Premium long posts
 # SOCIAL_SET_ID = ""            # optional: only act on this Typefully account
 
 # Secrets (never commit these): set with `npx wrangler secret put <NAME>`
-#   TYPEFULLY_API_KEY, WEBHOOK_SECRET, REPURPOSER_API_KEY
+#   TYPEFULLY_API_KEY, BUFFER_API_KEY, WEBHOOK_SECRET

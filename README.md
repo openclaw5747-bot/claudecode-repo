@@ -24,5 +24,5 @@ Files:
 ## LinkedIn → X auto-repurposer
 
 `linkedin-to-x/` is a Cloudflare Worker that turns each LinkedIn post you publish
-via Typefully into an X post queued in Typefully's next free slot. See
+via Typefully into an X post (rewritten with Workers AI) queued in Buffer. See
 [`linkedin-to-x/README.md`](linkedin-to-x/README.md) for setup.

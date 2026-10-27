@@ -1,8 +1,9 @@
 // Cloudflare Worker: Typefully "draft.published" webhook → repurpose the LinkedIn
-// post → queue it on X via Typefully.
+// post → add it to the X queue in Buffer.
 
-import { DEFAULT_TAG, linkedinText, shouldRepurpose } from "./logic.js";
-import { createXDraft, getDraft } from "./typefully.js";
+import { X_MAX_CHARS, fitPosts, linkedinText, shouldRepurpose } from "./logic.js";
+import { getDraft } from "./typefully.js";
+import { queueXPost } from "./buffer.js";
 import { repurpose } from "./repurpose.js";
 
 const DONE_TTL = 60 * 60 * 24 * 90; // remember handled drafts for 90 days
@@ -26,7 +27,7 @@ export default {
     }
 
     ctx.waitUntil(
-      handlePublished(payload.data, env).catch((err) => console.error("repurpose failed", err)),
+      handlePublished(payload.data, env).catch((err) => console.error("handling failed", err)),
     );
     return new Response("accepted", { status: 202 });
   },
@@ -43,30 +44,22 @@ async function handlePublished(event, env) {
 
   // Re-read the draft from the API rather than trusting the webhook body.
   const draft = await getDraft(env, socialSetId, draftId);
-  const tag = env.TAG || DEFAULT_TAG;
-  if (!shouldRepurpose(draft, tag)) return;
+  if (!shouldRepurpose(draft)) return;
 
   const source = linkedinText(draft);
-  const sourceNote = `Repurposed from LinkedIn: ${draft.linkedin_published_url ?? draftId}`;
-  const tags = env.TAG === "" ? [] : [tag];
+  const max = Number(env.X_MAX_CHARS) || X_MAX_CHARS;
 
-  let created;
+  let post;
   try {
-    const posts = await repurpose(source, env);
-    created = await createXDraft(env, socialSetId, posts, {
-      publishAt: env.PUBLISH_AT ?? "next-free-slot", // "" → save as draft only
-      tags,
-      note: sourceNote,
-    });
+    const { posts, via } = await repurpose(source, env);
+    post = await queueXPost(env, fitPosts(posts, max));
+    console.log(`queued ${draftId} on X via ${via}`, post);
   } catch (err) {
-    // Leave an unscheduled draft with the original text so nothing is lost.
-    created = await createXDraft(env, socialSetId, [source], {
-      tags,
-      note: `${sourceNote}\nAuto-repurpose failed, edit before posting: ${err.message}`,
-    });
-    console.error("repurposer failed, saved fallback draft", err);
+    // Every repurposer failed: leave the original text as a Buffer draft to edit.
+    console.error(`repurposing ${draftId} failed, saving original as draft`, err);
+    post = await queueXPost(env, fitPosts([source], max), { draft: true });
   }
-  await env.STATE.put(key, String(created?.id ?? "created"), { expirationTtl: DONE_TTL });
+  await env.STATE.put(key, String(post?.id ?? "done"), { expirationTtl: DONE_TTL });
 }
 
 // The webhook URL is /typefully/<WEBHOOK_SECRET>; compare in constant time.
