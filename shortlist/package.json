@@ -1,0 +1,17 @@
+{
+  "name": "shortlist",
+  "version": "0.1.0",
+  "description": "A self-hosted UK job search companion: find UK jobs, check visa sponsors, write tailored British CVs and cover letters, and track every application.",
+  "type": "module",
+  "private": true,
+  "license": "MIT",
+  "engines": { "node": ">=20" },
+  "scripts": {
+    "start": "node server.js",
+    "test": "node --test test/*.test.js"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^1.3.0",
+    "zod": "^4.6.7"
+  }
+}
