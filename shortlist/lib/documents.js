@@ -1,6 +1,9 @@
 // Builds the CV, cover letter and email from the profile plus the AI's draft. Facts (names,
 // employers, titles, dates, qualifications) always come from the profile; the AI only supplies
 // wording. Anything the AI wrote that can't be traced back to the profile is reported.
+// Your email and phone number appear as placeholders ([[email]], [[phone]]), filled in by your
+// browser, which is the only place they are kept.
+import { placeholder } from './privacy.js';
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
@@ -66,7 +69,7 @@ export function assemble(profile, analysis, draft, { now = new Date() } = {}) {
 
   const cv = {
     name: profile.name, headline: profile.headline,
-    contact: [profile.town, profile.phone, profile.email, profile.linkedin, profile.website].filter(Boolean),
+    contact: [profile.town, placeholder('phone'), placeholder('email'), profile.linkedin, profile.website].filter(Boolean),
     statement: draft.personalStatement,
     keySkills, experience, projects,
     education: profile.education || [], certifications: profile.certifications || [],
@@ -78,7 +81,7 @@ export function assemble(profile, analysis, draft, { now = new Date() } = {}) {
   // UK letter convention: a named recipient gets "Yours sincerely", "Dear Hiring Manager" gets "Yours faithfully".
   const contact = (analysis.contactName || '').trim();
   const coverLetter = {
-    sender: [profile.name, profile.town, profile.phone, profile.email].filter(Boolean),
+    sender: [profile.name, profile.town, placeholder('phone'), placeholder('email')].filter(Boolean),
     date: longDate(now),
     recipient: [contact, analysis.employer, analysis.location].filter(Boolean),
     greeting: `Dear ${contact || 'Hiring Manager'},`,
@@ -90,7 +93,7 @@ export function assemble(profile, analysis, draft, { now = new Date() } = {}) {
   const email = {
     to: analysis.contactEmail || '',
     subject: draft.email.subject,
-    body: `${draft.email.body.trim()}\n\nKind regards,\n${[profile.name, profile.phone].filter(Boolean).join('\n')}`,
+    body: `${draft.email.body.trim()}\n\nKind regards,\n${[profile.name, placeholder('phone')].filter(Boolean).join('\n')}`,
   };
 
   const figures = unverifiedFigures([
@@ -137,11 +140,27 @@ li { margin: 1px 0; }
 .toolbar button { font: inherit; padding: 6px 14px; cursor: pointer; }
 `;
 
+// Fills [[email]] and [[phone]] from this browser's storage; a detail you haven't given is left out.
+const FILL_CONTACT = `(function () {
+  var c = {};
+  try { c = JSON.parse(localStorage.getItem('shortlist.contact') || '{}'); } catch (e) {}
+  document.querySelectorAll('[data-private]').forEach(function (el) {
+    var v = c[el.getAttribute('data-private')];
+    if (v) el.textContent = v; else el.remove();
+  });
+})();`;
+
 const shell = (title, body) => `<!doctype html><html lang="en-GB"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${esc(title)}</title><style>${PRINT_CSS}</style></head>
-<body><div class="toolbar"><button onclick="print()">Print or save as PDF</button></div><div class="page">${body}</div></body></html>`;
+<body><div class="toolbar"><button onclick="print()">Print or save as PDF</button></div><div class="page">${body}</div><script>${FILL_CONTACT}</script></body></html>`;
+
+/** One line of contact details: a placeholder becomes an element the browser fills in. */
+const line = (tag, s) => {
+  const m = /^\[\[(\w+)\]\]$/.exec(s);
+  return m ? `<${tag} data-private="${m[1]}"></${tag}>` : `<${tag}>${esc(s)}</${tag}>`;
+};
 
 export function cvHtml(cv) {
-  const lines = (arr) => arr.map((l) => `<span>${esc(l)}</span>`).join('');
+  const lines = (arr) => arr.map((l) => line('span', l)).join('');
   const section = (title, html) => (html ? `<h2>${title}</h2>${html}` : '');
   return shell(`${cv.name} – CV`, `
 <h1>${esc(cv.name)}</h1>${cv.headline ? `<div class="headline">${esc(cv.headline)}</div>` : ''}
@@ -157,9 +176,9 @@ ${section('References', `<p>${esc(cv.references)}</p>`)}`);
 }
 
 export function letterHtml(l) {
-  const block = (arr) => arr.map(esc).join('<br>');
+  const block = (arr) => arr.map((l) => line('div', l)).join('');
   return shell(`${l.name} – cover letter`, `<div class="letter">
-<div class="sender">${block(l.sender)}<br><br>${esc(l.date)}</div>
+<div class="sender">${block(l.sender)}<div style="margin-top:1.4em">${esc(l.date)}</div></div>
 <div class="recipient">${block(l.recipient)}</div>
 <p>${esc(l.greeting)}</p>
 ${l.paragraphs.map((p) => `<p>${esc(p)}</p>`).join('')}

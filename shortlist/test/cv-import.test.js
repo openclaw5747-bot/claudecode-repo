@@ -22,11 +22,12 @@ function makePdf(text) {
   return Buffer.from(out, 'latin1');
 }
 
-test('reads a PDF CV, keeping the file for Claude and the text for a local model', async () => {
+test('reads the text of a PDF CV, and refuses a scan with no text', async () => {
   const doc = await readUpload('cv.pdf', makePdf('Priya Shah - Junior Developer at Acme Ltd'));
   assert.equal(doc.kind, 'pdf');
   assert.match(doc.text, /Priya Shah - Junior Developer at Acme Ltd/);
-  assert.ok(doc.pdf.length > 100);
+  assert.equal(doc.pdf, undefined, 'the file itself is not kept or sent anywhere');
+  await assert.rejects(readUpload('scan.pdf', makePdf('')), /no text/);
 });
 
 test('reads text files and refuses what it cannot read', async () => {
@@ -46,12 +47,12 @@ test('tidies LinkedIn addresses and rejects anything else', () => {
 
 test('merging keeps what you typed and adds what is new', () => {
   const current = {
-    name: 'Priya Shah', email: '', town: 'Leeds', skills: ['React'], languages: [], drivingLicence: false,
+    name: 'Priya Shah', town: 'Leeds', skills: ['React'], languages: [], drivingLicence: false,
     experience: [{ id: 'e1', title: 'Junior Developer', employer: 'Acme Ltd', start: '2025-01', achievements: ['Mine'] }],
     education: [], certifications: [], projects: [],
   };
   const found = {
-    name: 'P. Shah', email: 'priya@example.com', town: 'London', skills: ['react', 'TypeScript'], languages: ['Gujarati (fluent)'], drivingLicence: true,
+    name: 'P. Shah', email: 'priya@example.com', phone: '07700 900123', town: 'London', skills: ['react', 'TypeScript'], languages: ['Gujarati (fluent)'], drivingLicence: true,
     experience: [
       { title: 'Junior developer', employer: 'ACME LTD', start: '2025-01', achievements: ['Theirs'] },
       { title: 'Retail Assistant', employer: 'Boots', start: '2022-06', achievements: [] },
@@ -61,34 +62,34 @@ test('merging keeps what you typed and adds what is new', () => {
   const { profile, added } = mergeProfile(current, found);
   assert.equal(profile.name, 'Priya Shah');
   assert.equal(profile.town, 'Leeds');
-  assert.equal(profile.email, 'priya@example.com');
+  assert.equal(profile.email, undefined, 'contact details never come from the AI');
+  assert.equal(profile.phone, undefined);
   assert.deepEqual(profile.skills, ['React', 'TypeScript']);
   assert.deepEqual(profile.experience.map((e) => e.employer), ['Acme Ltd', 'Boots']);
   assert.equal(profile.experience[0].achievements[0], 'Mine');
   assert.equal(profile.drivingLicence, true);
-  assert.deepEqual(added, ['email', 'drivingLicence', '1 skills', '1 languages', '1 experience', '1 education']);
+  assert.deepEqual(added, ['drivingLicence', '1 skills', '1 languages', '1 experience', '1 education']);
   assert.equal(current.experience.length, 1, 'the current profile is not changed');
 });
 
 test('a local model gets the documents as text and the LinkedIn address', async () => {
   const provider = createProvider({ AI_PROVIDER: 'ollama', OLLAMA_MODEL: 'm' });
-  const answer = { name: 'Priya Shah', email: '', phone: '', town: 'Leeds', postcode: '', linkedin: '', website: '', headline: '', statement: '', skills: [], languages: [], drivingLicence: false, noticePeriod: '', clearance: '', experience: [], education: [], certifications: [], projects: [] };
+  const answer = { name: 'Priya Shah', town: 'Leeds', linkedin: '', website: '', headline: '', statement: '', skills: [], languages: [], drivingLicence: false, noticePeriod: '', clearance: '', experience: [], education: [], certifications: [], projects: [] };
   let body;
   provider.fetch = async (url, opts) => { body = JSON.parse(opts.body); return Response.json({ message: { content: JSON.stringify(answer) } }); };
-  const out = await importProfile(provider, [{ name: 'cv.pdf', kind: 'pdf', text: 'Priya Shah, Leeds', pdf: 'xx' }], 'https://www.linkedin.com/in/priya');
+  const out = await importProfile(provider, [{ name: 'cv.pdf', kind: 'pdf', text: 'Priya Shah, Leeds' }], 'https://www.linkedin.com/in/priya');
   assert.equal(out.town, 'Leeds');
   assert.match(body.messages[1].content, /<document name="cv.pdf">\nPriya Shah, Leeds/);
   assert.match(body.messages[1].content, /linkedin\.com\/in\/priya/);
-  await assert.rejects(importProfile(provider, [{ name: 'scan.pdf', kind: 'pdf', text: '', pdf: 'xx' }]), /scan/);
 });
 
-test('Claude gets a PDF as a document, and other files as text', async () => {
+test('Claude gets the CV as text only', async () => {
   const provider = createProvider({ ANTHROPIC_API_KEY: 'x' });
   let args;
   provider.client.beta.messages.parse = async (a) => { args = a; return { stop_reason: 'end_turn', parsed_output: { name: 'Priya' } }; };
-  await importProfile(provider, [{ name: 'cv.pdf', kind: 'pdf', text: 't', pdf: 'QUJD' }, { name: 'notes.txt', kind: 'text', text: 'Extra notes' }]);
-  const [doc, text] = args.messages[0].content;
-  assert.deepEqual(doc, { type: 'document', title: 'cv.pdf', source: { type: 'base64', media_type: 'application/pdf', data: 'QUJD' } });
-  assert.match(text.text, /<document name="notes.txt">\nExtra notes/);
+  await importProfile(provider, [{ name: 'cv.pdf', kind: 'pdf', text: 'Priya Shah\n[phone removed]' }]);
+  const content = args.messages[0].content;
+  assert.equal(typeof content, 'string');
+  assert.match(content, /<document name="cv.pdf">\nPriya Shah\n\[phone removed\]/);
   assert.equal(args.model, 'claude-opus-5-5');
 });

@@ -54,12 +54,25 @@ test('dates read the British way', () => {
 
 test('printable pages escape what they show', () => {
   const docs = assemble({ ...profile, name: 'Priya <script>' }, { employer: 'X' }, draft);
-  assert.ok(!cvHtml(docs.cv).includes('<script>'));
-  assert.ok(!letterHtml(docs.coverLetter).includes('<script>'));
+  assert.ok(!cvHtml(docs.cv).includes('Priya <script>'));
+  assert.ok(cvHtml(docs.cv).includes('Priya &lt;script&gt;'));
+  assert.ok(!letterHtml(docs.coverLetter).includes('Priya <script>'));
   assert.match(cvHtml(docs.cv), /size: A4/);
 });
 
 test('reports a figure in full', () => {
   const docs = assemble(profile, { employer: 'X' }, { ...draft, coverLetter: { paragraphs: ['We served 2 million users.'] } });
   assert.ok(docs.issues.some((i) => i.includes('"2 million"')));
+});
+
+test('documents carry placeholders, not your email or phone number', () => {
+  const docs = assemble({ ...profile, email: 'priya@example.com', phone: '07700 900123' }, { employer: 'X', contactName: '' }, draft);
+  const all = JSON.stringify(docs);
+  assert.ok(!all.includes('priya@example.com') && !all.includes('07700 900123'));
+  assert.deepEqual(docs.cv.contact.slice(0, 3), ['Leeds', '[[phone]]', '[[email]]']);
+  assert.match(docs.email.body, /Kind regards,\nPriya Shah\n\[\[phone\]\]$/);
+  const html = cvHtml(docs.cv);
+  assert.match(html, /<span data-private="phone"><\/span>/);
+  assert.match(html, /localStorage\.getItem\('shortlist\.contact'\)/);
+  assert.match(letterHtml(docs.coverLetter), /<div data-private="email"><\/div>/);
 });

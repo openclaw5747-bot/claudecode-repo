@@ -29,6 +29,22 @@ async function busy(button, label, fn) {
   finally { if (button && button.isConnected) { button.disabled = false; button.innerHTML = old; } }
 }
 
+// Your email, phone number and postcode are kept in this browser only, never on the server or sent
+// to the AI. Documents hold placeholders ([[email]], [[phone]]) that are filled in here.
+const CONTACT_KEY = 'shortlist.contact';
+const PRIVATE_FIELDS = ['email', 'phone', 'postcode'];
+function getContact() {
+  try { return JSON.parse(localStorage.getItem(CONTACT_KEY) || '{}') || {}; } catch { return {}; }
+}
+function setContact(contact) {
+  try { localStorage.setItem(CONTACT_KEY, JSON.stringify(contact)); return true; } catch { return false; }
+}
+const fillContact = (text, c = getContact()) =>
+  String(text ?? '').replace(/\[\[(email|phone)\]\]/g, (_, k) => c[k] || '').replace(/\n{3,}/g, '\n\n').trimEnd();
+/** Puts the placeholders back before an edited document is saved, so the details aren't stored. */
+const unfillContact = (text, c = getContact()) =>
+  ['email', 'phone'].reduce((t, k) => (c[k] ? t.split(c[k]).join(`[[${k}]]`) : t), String(text ?? ''));
+
 const ukDate = (iso) => (iso ? new Date(iso).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }) : '');
 const sponsorChip = (s) => {
   if (!s) return '';
@@ -278,7 +294,7 @@ function drawDoc(id, d) {
   if (docTab === 'cv') {
     const cv = d.cv;
     body.innerHTML = `<div class="row" style="margin-bottom:10px"><a class="button" href="/print/${id}/cv" target="_blank">Open for printing / PDF</a><button id="editCv">Edit</button></div>
-      <div class="paper"><div style="font-size:1.35rem;font-weight:700">${esc(cv.name)}</div>${cv.headline ? `<div>${esc(cv.headline)}</div>` : ''}<div class="small" style="color:#555">${cv.contact.map(esc).join(' · ')}</div>
+      <div class="paper"><div style="font-size:1.35rem;font-weight:700">${esc(cv.name)}</div>${cv.headline ? `<div>${esc(cv.headline)}</div>` : ''}<div class="small" style="color:#555">${cv.contact.map((l) => fillContact(l)).filter(Boolean).map(esc).join(' · ')}</div>
       <h4>Personal statement</h4><p>${esc(cv.statement)}</p>
       <h4>Key skills</h4><p>${cv.keySkills.map(esc).join(' · ')}</p>
       <h4>Employment history</h4>${cv.experience.map((e) => `<div><b>${esc(e.title)}</b>, ${esc(e.employer)} <span style="color:#666;float:right">${esc(e.dates)}</span><ul>${e.bullets.map((b) => `<li>${esc(b)}</li>`).join('')}</ul></div>`).join('')}
@@ -315,13 +331,13 @@ function drawDoc(id, d) {
     const m = d.email;
     body.innerHTML = `<div class="stack"><div><label>To</label><input id="to" value="${esc(m.to)}" placeholder="The address in the advert"></div>
       <div><label>Subject</label><input id="sj" value="${esc(m.subject)}"></div>
-      <div><label>Message</label><textarea id="bd" rows="12">${esc(m.body)}</textarea></div>
+      <div><label>Message</label><textarea id="bd" rows="12">${esc(fillContact(m.body))}</textarea></div>
       <p class="small muted">Attach the CV and cover letter PDFs (from the other tabs) before sending.</p>
       <div class="row"><button class="primary" id="mail">Open in my email app</button><button id="copy">Copy message</button><button id="saveM">Save</button></div></div>`;
     const read = () => ({ to: $('#to').value, subject: $('#sj').value, body: $('#bd').value });
     $('#mail').onclick = () => { const x = read(); location.href = `mailto:${encodeURIComponent(x.to)}?subject=${encodeURIComponent(x.subject)}&body=${encodeURIComponent(x.body)}`; };
     $('#copy').onclick = async () => { await navigator.clipboard.writeText(read().body); toast('Copied'); };
-    $('#saveM').onclick = (e) => { Object.assign(m, read()); saveDocs({ email: m }, e.target); };
+    $('#saveM').onclick = (e) => { const x = read(); Object.assign(m, x, { body: unfillContact(x.body) }); saveDocs({ email: m }, e.target); };
   }
 }
 
@@ -350,7 +366,20 @@ const readBase64 = (file) => new Promise((resolve, reject) => {
 /** `imported` is a profile read from a CV that hasn't been saved yet. */
 async function renderProfile(arg, imported) {
   const p = imported?.profile || await api('/api/profile');
+  // Contact details from before they moved to the browser: keep them here, and remove them from the server.
+  if (p.legacyContact) {
+    const c = getContact();
+    for (const f of PRIVATE_FIELDS) if (!c[f] && p.legacyContact[f]) c[f] = p.legacyContact[f];
+    if (setContact(c)) await api('/api/profile', { method: 'PUT', body: {} });
+    delete p.legacyContact;
+  }
+  // What's already in this browser wins over what was read from a CV.
+  const contact = getContact();
+  for (const f of PRIVATE_FIELDS) {
+    if (!contact[f] && imported?.contact?.[f]) { contact[f] = imported.contact[f]; imported.added.push(f); }
+  }
   const input = (key, label, opts = '') => `<div class="field"><label for="f-${key}">${label}</label><input id="f-${key}" data-key="${key}" value="${esc(p[key])}" ${opts}></div>`;
+  const privateInput = (key, label, opts = '') => `<div class="field"><label for="f-${key}">${label} <span title="Kept in this browser only">🔒</span></label><input id="f-${key}" data-private="${key}" value="${esc(contact[key])}" ${opts}></div>`;
   view.innerHTML = `
     <h1>Your profile</h1>
     <p class="lede">Everything your CVs and cover letters are written from. The AI uses only what is here, so the more real detail (results, numbers, tools), the better the documents. A UK CV leaves out your photo, date of birth and marital status, so there's nowhere to put them.</p>
@@ -367,8 +396,9 @@ async function renderProfile(arg, imported) {
     ${imported ? `<div class="notice warn" id="importNotice"><b>Not saved yet.</b> Read from ${imported.read.length ? esc(imported.read.join(' and ')) : 'your LinkedIn address'}${imported.added.length ? `, adding ${esc(imported.added.map(addedLabel).join(', '))}` : ', but nothing new was found'}. Check everything below, fix anything it got wrong, then <b>Save profile</b>.</div>` : ''}
     <form id="profile" class="stack">
       <div class="card stack"><h2 style="margin-top:0">About you</h2>
-        <div class="grid">${input('name', 'Full name')}${input('headline', 'Headline, e.g. Junior Software Engineer')}${input('email', 'Email', 'type="email"')}${input('phone', 'Phone')}
-        ${input('town', 'Town or city')}${input('postcode', 'Postcode area (not shown on the CV)')}${input('linkedin', 'LinkedIn')}${input('website', 'Website or GitHub')}</div>
+        <div class="grid">${input('name', 'Full name')}${input('headline', 'Headline, e.g. Junior Software Engineer')}${privateInput('email', 'Email', 'type="email" autocomplete="email"')}${privateInput('phone', 'Phone', 'type="tel" autocomplete="tel"')}
+        ${input('town', 'Town or city')}${privateInput('postcode', 'Postcode area (not shown on the CV)')}${input('linkedin', 'LinkedIn')}${input('website', 'Website or GitHub')}</div>
+        <p class="small muted" style="margin:0">🔒 Your email, phone and postcode are kept in this browser only: never saved on the server, in backups, or sent to the AI. They're added to your CV, letter and email when you open them here, so on another computer or browser you'll need to type them in again.</p>
         <div><label for="f-statement">About you, in your own words (the AI writes each personal statement from this)</label><textarea id="f-statement" data-key="statement" rows="4">${esc(p.statement)}</textarea></div>
         <div class="grid"><div><label for="f-skills">Skills, one per line</label><textarea id="f-skills" data-list="skills" rows="8">${esc((p.skills || []).join('\n'))}</textarea></div>
         <div><label for="f-languages">Languages, one per line (e.g. “Polish (native)”)</label><textarea id="f-languages" data-list="languages" rows="8">${esc((p.languages || []).join('\n'))}</textarea></div></div>
@@ -406,7 +436,7 @@ async function renderProfile(arg, imported) {
     if (t.dataset.remove) { lists[t.dataset.remove].splice(+t.dataset.i, 1); drawSection(t.dataset.remove); }
   });
   const strength = () => {
-    const checks = [p.name, p.email, p.phone, p.town, p.statement, (p.skills || []).length >= 5, lists.experience.length, lists.experience.some((e) => (e.achievements || []).length >= 3), lists.education.length, p.rightToWork];
+    const checks = [p.name, $('#f-email').value, $('#f-phone').value, p.town, p.statement, (p.skills || []).length >= 5, lists.experience.length, lists.experience.some((e) => (e.achievements || []).length >= 3), lists.education.length, p.rightToWork];
     $('#strength').textContent = `Profile ${Math.round((100 * checks.filter(Boolean).length) / checks.length)}% complete`;
   };
   strength();
@@ -427,7 +457,9 @@ async function renderProfile(arg, imported) {
     $$('[data-key]', view$).forEach((el) => { body[el.dataset.key] = el.value.trim(); });
     $$('[data-list]', view$).forEach((el) => { body[el.dataset.list] = el.value.split('\n').map((s) => s.trim()).filter(Boolean); });
     body.drivingLicence = $('#f-drivingLicence').checked;
-    busy($('#saveProfile'), 'Saving', async () => { Object.assign(p, await api('/api/profile', { method: 'PUT', body })); Object.keys(SECTIONS).forEach((k) => { lists[k] = p[k]; drawSection(k); }); strength(); $('#importNotice')?.remove(); toast('Profile saved'); });
+    const kept = Object.fromEntries($$('[data-private]', view$).map((el) => [el.dataset.private, el.value.trim()]));
+    busy($('#saveProfile'), 'Saving', async () => {
+      const stored = setContact(kept); Object.assign(p, await api('/api/profile', { method: 'PUT', body })); Object.keys(SECTIONS).forEach((k) => { lists[k] = p[k]; drawSection(k); }); strength(); $('#importNotice')?.remove(); toast(stored ? 'Profile saved' : "Profile saved, but this browser won't keep your contact details (private browsing?), so they'll be left off your documents."); });
   };
 }
 

@@ -9,6 +9,7 @@ import { reed, adzuna, searchAll } from './lib/sources.js';
 import { formatSalary, ukFlags } from './lib/salary.js';
 import { createProvider, analyse, tailor, importProfile } from './lib/ai.js';
 import { readUpload, mergeProfile, linkedinUrl, MAX_UPLOAD_BYTES } from './lib/cv-import.js';
+import { PRIVATE_FIELDS, withoutPrivate, placeholder, redact } from './lib/privacy.js';
 import { assemble, cvHtml, letterHtml } from './lib/documents.js';
 
 try { process.loadEnvFile(); } catch {}
@@ -21,6 +22,7 @@ const env = process.env;
 await fs.mkdir(DATA, { recursive: true });
 const store = new Store(DATA);
 await store.load();
+await scrubContactDetails();
 const sponsors = new SponsorRegister(DATA);
 sponsors.load().catch((err) => console.warn(err.message));
 setInterval(() => sponsors.load().catch((err) => console.warn(err.message)), 6 * 60 * 60 * 1000).unref();
@@ -124,17 +126,24 @@ route('GET', /^\/api\/status$/, async (req, res) => send(res, 200, {
   statuses: STATUSES,
 }), { open: true });
 
-route('GET', /^\/api\/profile$/, async (req, res) => send(res, 200, store.data.profile));
+// Profiles saved before contact details moved to the browser still hold them. They're handed to the
+// page once (as legacyContact), which keeps them and saves the profile, removing them here.
+route('GET', /^\/api\/profile$/, async (req, res) => {
+  const legacy = Object.fromEntries(PRIVATE_FIELDS.filter((f) => store.data.profile[f]).map((f) => [f, store.data.profile[f]]));
+  send(res, 200, { ...withoutPrivate(store.data.profile), ...(Object.keys(legacy).length ? { legacyContact: legacy } : {}) });
+});
 route('PUT', /^\/api\/profile$/, async (req, res) => {
-  const profile = await readJson(req);
+  const { legacyContact, ...profile } = withoutPrivate(await readJson(req));
   for (const key of ['experience', 'education', 'certifications', 'projects']) {
-    profile[key] = (profile[key] || []).map((e) => ({ ...e, id: e.id || newId() }));
+    if (profile[key]) profile[key] = profile[key].map((e) => ({ ...e, id: e.id || newId() }));
   }
-  await store.update((d) => { d.profile = { ...d.profile, ...profile }; });
+  await store.update((d) => { d.profile = withoutPrivate({ ...d.profile, ...profile }); });
   send(res, 200, store.data.profile);
 });
 
-// Reads a CV into the profile. Nothing is saved: the merged profile goes
+// Reads a CV into the profile. Its email, phone number and address are taken out of the text first:
+// they go back to the page (which keeps them in the browser) and never to the AI or the disk.
+// Nothing is saved: the merged profile goes
 // back to the page to be checked, and saved like any other edit.
 route('POST', /^\/api\/profile\/import$/, async (req, res) => {
   const { files = [], linkedin } = await readJson(req, 2 * MAX_UPLOAD_BYTES);
@@ -148,12 +157,18 @@ route('POST', /^\/api\/profile\/import$/, async (req, res) => {
     catch (err) { throw new HttpError(400, err.message); }
   }
   let found = { linkedin: link };
+  const contact = {};
+  for (const d of documents) {
+    const { text, found: details } = redact(d.text);
+    d.text = text;
+    for (const [k, v] of Object.entries(details)) contact[k] ??= v;
+  }
   if (documents.length) {
     needAi();
     found = await ai(() => importProfile(provider, documents, link));
     if (link) found.linkedin = link;
   }
-  send(res, 200, { ...mergeProfile(store.data.profile, found), read: documents.map((d) => d.name) });
+  send(res, 200, { ...mergeProfile(withoutPrivate(store.data.profile), found), contact, read: documents.map((d) => d.name) });
 });
 
 route('GET', /^\/api\/jobs$/, async (req, res, url) => {
@@ -290,14 +305,32 @@ route('GET', /^\/print\/([\w-]+)\/(cv|letter)$/, async (req, res, url, [id, kind
 });
 
 route('GET', /^\/api\/export$/, async (req, res) =>
-  send(res, 200, store.data, { 'Content-Disposition': `attachment; filename="shortlist-${new Date().toISOString().slice(0, 10)}.json"` }));
+  send(res, 200, { ...store.data, profile: withoutPrivate(store.data.profile) }, { 'Content-Disposition': `attachment; filename="shortlist-${new Date().toISOString().slice(0, 10)}.json"` }));
 
 route('POST', /^\/api\/import$/, async (req, res) => {
   const data = await readJson(req);
   if (!data.profile || !Array.isArray(data.applications)) throw new HttpError(400, 'That is not a Shortlist export.');
-  await store.update((d) => Object.assign(d, { saved: [], dismissed: [], ...data }));
+  await store.update((d) => Object.assign(d, { saved: [], dismissed: [], ...data, profile: withoutPrivate(data.profile) }));
+  await scrubContactDetails(data.profile);
   send(res, 200, { ok: true });
 });
+
+/**
+ * Documents written before contact details moved to the browser have them in plain text. Swap each
+ * one (from the profile, or `from`) for its placeholder, so the page fills it in from the browser.
+ */
+async function scrubContactDetails(from = store.data.profile) {
+  const swaps = ['email', 'phone'].filter((f) => from?.[f]).map((f) => [String(from[f]), placeholder(f)]);
+  if (!swaps.length) return;
+  const scrub = (v) => typeof v === 'string' ? swaps.reduce((s, [a, b]) => s.split(a).join(b), v)
+    : Array.isArray(v) ? v.map(scrub) : v && typeof v === 'object' ? Object.fromEntries(Object.entries(v).map(([k, x]) => [k, scrub(x)])) : v;
+  await store.update((d) => {
+    for (const app of d.applications) {
+      if (app.documents) app.documents = scrub(app.documents);
+      if (app.versions) app.versions = scrub(app.versions);
+    }
+  });
+}
 
 function mustApp(id) {
   const app = store.application(id);

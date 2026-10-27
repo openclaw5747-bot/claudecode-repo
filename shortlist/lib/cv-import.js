@@ -1,5 +1,6 @@
-// Starting a profile from what you already have: a CV (PDF, Word or text). The AI reads it into
-// profile fields, which are merged into the profile for you to check before saving.
+// Starting a profile from what you already have: a CV (PDF, Word or text). Its contact details are
+// taken out (see privacy.js), then the AI reads the rest into profile fields, which are merged into
+// the profile for you to check before saving.
 import { extractText, getDocumentProxy } from 'unpdf';
 import mammoth from 'mammoth';
 
@@ -17,9 +18,11 @@ export async function readUpload(name, buf) {
     let text = '';
     try {
       const pdf = await getDocumentProxy(new Uint8Array(buf));
-      text = (await extractText(pdf, { mergePages: true })).text;
+      text = (await extractText(pdf, { mergePages: true })).text.trim();
     } catch { throw new Error(`Couldn't read ${name} as a PDF.`); }
-    return { name, kind: 'pdf', text: text.trim(), pdf: buf.toString('base64') };
+    // Only the text is used (so contact details can be taken out first), which a scanned CV doesn't have.
+    if (!text) throw new Error(`${name} has no text in it (is it a scan?). Try a Word or text copy.`);
+    return { name, kind: 'pdf', text };
   }
   if (isZip(buf) && ext === 'docx') {
     const { value } = await mammoth.extractRawText({ buffer: buf }).catch(() => { throw new Error(`Couldn't read ${name} as a Word document.`); });
@@ -43,7 +46,7 @@ export function linkedinUrl(input) {
 
 const clean = (s) => String(s ?? '').trim();
 const key = (...parts) => parts.map((p) => clean(p).toLowerCase().replace(/[^a-z0-9]/g, '')).join('|');
-const SCALARS = ['name', 'email', 'phone', 'town', 'postcode', 'linkedin', 'website', 'headline', 'statement', 'noticePeriod', 'clearance'];
+const SCALARS = ['name', 'town', 'linkedin', 'website', 'headline', 'statement', 'noticePeriod', 'clearance'];
 const LISTS = {
   experience: (e) => key(e.title, e.employer, e.start),
   education: (e) => key(e.qualification, e.institution),

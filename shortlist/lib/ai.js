@@ -45,9 +45,8 @@ export const TailoredSchema = z.object({
 const month = () => z.string().describe('YYYY-MM, or YYYY if only the year is given; empty if not given (for an end date, empty means it is current)');
 
 export const ImportedProfileSchema = z.object({
-  name: z.string(), email: z.string(), phone: z.string(),
-  town: z.string().describe('Town or city only, never a full street address'),
-  postcode: z.string().describe('Only the outward part, e.g. "LS6", or empty'),
+  name: z.string(),
+  town: z.string().describe('Town or city only, never a street address'),
   linkedin: z.string(), website: z.string(),
   headline: z.string().describe('Their current or target job title, e.g. "Junior Software Engineer"'),
   statement: z.string().describe('Their own summary or personal statement, close to their words; empty if there is none'),
@@ -70,7 +69,7 @@ export const ImportedProfileSchema = z.object({
 
 const IMPORT_PROMPT = `This is the candidate's own CV. Read it into profile fields.
 
-Copy what is there; don't improve, summarise away or add to it. Leave a field empty (or a list empty) when the documents don't say. Leave out date of birth, age, marital status, nationality, photos and full street addresses.`;
+Copy what is there; don't improve, summarise away or add to it. Leave a field empty (or a list empty) when the documents don't say. Contact details have been removed and marked as such; that's expected. Leave out date of birth, age, marital status, nationality, photos and street addresses.`;
 
 const RULES = `You help a job seeker in the United Kingdom apply for jobs.
 
@@ -109,11 +108,7 @@ class AnthropicProvider {
   }
 
   async json(schema, prompt, { documents = [] } = {}) {
-    // Claude reads PDFs directly, layout included; other files go in as text.
-    const content = [
-      ...documents.filter((d) => d.kind === 'pdf').map((d) => ({ type: 'document', title: d.name, source: { type: 'base64', media_type: 'application/pdf', data: d.pdf } })),
-      { type: 'text', text: withTextDocuments(prompt, documents.filter((d) => d.kind !== 'pdf')) },
-    ];
+    const content = withTextDocuments(prompt, documents);
     const res = await this.client.beta.messages.parse({
       model: this.model,
       max_tokens: 16000,
@@ -141,8 +136,6 @@ class OllamaProvider {
   }
 
   async json(schema, prompt, { documents = [] } = {}) {
-    const unreadable = documents.find((d) => !d.text);
-    if (unreadable) throw new Error(`${unreadable.name} has no text a local model can read (is it a scan?). Try a Word or text copy.`);
     prompt = withTextDocuments(prompt, documents);
     const res = await this.fetch(`${this.url}/api/chat`, {
       method: 'POST',

@@ -10,7 +10,8 @@ A job search companion for the UK that runs on your own computer. Inspired by
 - **Tailored British CV, cover letter and email.** Two pages in British English, with no photo, date of birth or marital status. It has a personal statement, key skills, employment history and "References available on request". The letter follows UK convention: "Dear Hiring Manager … Yours faithfully", or "Dear Ms Patel … Yours sincerely". Pick a tone, ask for changes, edit by hand, or undo. Print to PDF on A4.
 - **Never invents experience.** Job titles, employers, dates and qualifications come straight from your profile; the AI only writes the wording. Skills not in your profile are removed, and any figure (40%, £2m, a team of 10) not found in your profile is flagged before you send. If an advert asks for something you don't have, it's listed as a gap, not claimed.
 - **Track every application** on a board, from Saved through Drafting, Applied, Interview and Offer to Rejected, with notes and history.
-- **Your data stays with you.** It's one JSON file on your disk, with export and import. Use Claude, or a local model through [Ollama](https://ollama.com) so nothing leaves your machine.
+- **Your contact details stay in your browser.** Your email, phone number and postcode are kept in your browser only. They are never saved on the server, in backups, or sent to the AI. They're added to your CV, letter and email when you open them, so on another computer you type them in again. When you upload a CV, its email, phone number and home address are taken out before the AI reads it. The CV file itself isn't kept.
+- **Your data stays with you.** Everything else is one JSON file on your disk (never committed to git), with export and import. Use Claude, or a local model through [Ollama](https://ollama.com) so nothing leaves your machine.
 
 ## Run it
 
@@ -34,7 +35,7 @@ Set up in `.env`:
 
 Then fill in **Profile**, or upload your CV there to fill it in for you. The more real detail you give (results, numbers, tools), the better the documents. After that, find a job or paste an advert, match it, and write your documents.
 
-Using Claude sends your profile and the advert to Anthropic's API. Using Ollama keeps everything on your machine; a model of about 14B parameters or more follows the format reliably.
+Using Claude sends your profile (without your contact details) and the advert to Anthropic's API. Using Ollama keeps everything on your machine; a model of about 14B parameters or more follows the format reliably.
 
 ## Tests
 
@@ -51,6 +52,7 @@ npm test
 | `lib/sponsors.js` | Downloads, parses and searches the sponsor register |
 | `lib/salary.js` | £ formatting, day and hourly rates, UK flags in advert text |
 | `lib/ai.js` | Prompts and schemas; Claude or Ollama |
+| `lib/privacy.js` | Which details stay in the browser, and taking them out of uploaded CVs |
 | `lib/cv-import.js` | Reads uploaded CVs (PDF, Word, text) and merges what the AI found into the profile |
 | `lib/documents.js` | Builds the CV, letter and email from your profile, checks what the AI wrote, renders A4 pages |
 | `lib/store.js` | The JSON file, written safely |
