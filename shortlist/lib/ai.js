@@ -68,9 +68,9 @@ export const ImportedProfileSchema = z.object({
   projects: z.array(z.object({ name: z.string(), url: z.string(), description: z.string() })),
 });
 
-const IMPORT_PROMPT = `These are the candidate's own documents: a CV and/or a PDF export of their LinkedIn profile. Read them into profile fields.
+const IMPORT_PROMPT = `This is the candidate's own CV. Read it into profile fields.
 
-Copy what is there; don't improve, summarise away or add to it. Leave a field empty (or a list empty) when the documents don't say. Where two documents describe the same job, give it once with everything both say. Leave out date of birth, age, marital status, nationality, photos and full street addresses.`;
+Copy what is there; don't improve, summarise away or add to it. Leave a field empty (or a list empty) when the documents don't say. Leave out date of birth, age, marital status, nationality, photos and full street addresses.`;
 
 const RULES = `You help a job seeker in the United Kingdom apply for jobs.
 

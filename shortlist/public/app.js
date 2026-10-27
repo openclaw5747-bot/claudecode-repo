@@ -347,7 +347,7 @@ const readBase64 = (file) => new Promise((resolve, reject) => {
   r.readAsDataURL(file);
 });
 
-/** `imported` is a profile read from a CV or LinkedIn that hasn't been saved yet. */
+/** `imported` is a profile read from a CV that hasn't been saved yet. */
 async function renderProfile(arg, imported) {
   const p = imported?.profile || await api('/api/profile');
   const input = (key, label, opts = '') => `<div class="field"><label for="f-${key}">${label}</label><input id="f-${key}" data-key="${key}" value="${esc(p[key])}" ${opts}></div>`;
@@ -359,11 +359,8 @@ async function renderProfile(arg, imported) {
       <p class="muted" style="margin:4px 0 0">Upload your CV and the AI copies it into the profile below for you to check. What you've already typed is kept; new jobs and qualifications are added.</p></div>
       <div class="grid">
         <div><label for="cvFile">Your CV (PDF, Word or text)</label><input id="cvFile" type="file" accept=".pdf,.docx,.txt,.md,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,text/plain"></div>
-        <div><label for="liUrl">LinkedIn profile address (optional)</label><input id="liUrl" type="url" inputmode="url" placeholder="linkedin.com/in/your-name" value="${esc(p.linkedin)}"></div>
-        <div><label for="liFile">LinkedIn profile as a PDF (optional)</label><input id="liFile" type="file" accept=".pdf,application/pdf"></div>
+        <div><label for="liUrl">LinkedIn profile address (optional; saved and put on your CVs)</label><input id="liUrl" type="url" inputmode="url" placeholder="linkedin.com/in/your-name" value="${esc(p.linkedin)}"></div>
       </div>
-      <details class="small muted"><summary>Why a PDF from LinkedIn, and how to get one</summary>
-        <p style="margin-top:6px">LinkedIn doesn't let other apps read profiles from a link, so your address is saved and put on your CVs, and the profile itself comes from LinkedIn's own export. On linkedin.com, open your profile, click <b>Resources</b> (or <b>More</b>), then <b>Save to PDF</b>, and choose that file here.</p></details>
       <div class="row"><button type="button" class="primary" id="importGo" ${status.ai ? '' : 'title="Set up an AI model in Settings to read files"'}>Fill in my profile</button>
         <span class="small muted">${status.ai ? `Read by ${esc(status.ai)}.` : 'Reading files needs an AI model (see <a href="#/settings">Settings</a>); a LinkedIn address alone works without one.'}</span></div>
     </div>
@@ -415,9 +412,8 @@ async function renderProfile(arg, imported) {
   strength();
   $('#importGo').onclick = (e) => busy(e.target, 'Reading your CV (this can take a minute)', async () => {
     const files = [];
-    for (const input of [$('#cvFile'), $('#liFile')]) {
-      const file = input.files[0];
-      if (!file) continue;
+    const file = $('#cvFile').files[0];
+    if (file) {
       if (file.size > 10 * 1024 * 1024) throw new Error(`${file.name} is larger than 10 MB.`);
       files.push({ name: file.name, data: await readBase64(file) });
     }

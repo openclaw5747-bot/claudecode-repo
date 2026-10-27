@@ -1,6 +1,5 @@
-// Starting a profile from what you already have: a CV (PDF, Word or text) and LinkedIn's own
-// "Save to PDF" export of your profile. The AI reads them into profile fields, which are merged
-// into the profile for you to check before saving.
+// Starting a profile from what you already have: a CV (PDF, Word or text). The AI reads it into
+// profile fields, which are merged into the profile for you to check before saving.
 import { extractText, getDocumentProxy } from 'unpdf';
 import mammoth from 'mammoth';
 

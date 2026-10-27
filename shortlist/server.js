@@ -134,14 +134,14 @@ route('PUT', /^\/api\/profile$/, async (req, res) => {
   send(res, 200, store.data.profile);
 });
 
-// Reads a CV and/or LinkedIn's PDF export into the profile. Nothing is saved: the merged profile goes
+// Reads a CV into the profile. Nothing is saved: the merged profile goes
 // back to the page to be checked, and saved like any other edit.
 route('POST', /^\/api\/profile\/import$/, async (req, res) => {
-  const { files = [], linkedin } = await readJson(req, 3 * MAX_UPLOAD_BYTES);
+  const { files = [], linkedin } = await readJson(req, 2 * MAX_UPLOAD_BYTES);
   let link;
   try { link = linkedinUrl(linkedin); } catch (err) { throw new HttpError(400, err.message); }
   if (!files.length && !link) throw new HttpError(400, 'Choose your CV, or add your LinkedIn address.');
-  if (files.length > 3) throw new HttpError(400, 'Up to three files at a time.');
+  if (files.length > 1) throw new HttpError(400, 'One CV at a time.');
   const documents = [];
   for (const f of files) {
     try { documents.push(await readUpload(String(f.name || 'file'), Buffer.from(String(f.data || ''), 'base64'))); }
