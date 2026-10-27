@@ -333,12 +333,41 @@ const SECTIONS = {
   projects: { title: 'Projects', add: 'Add a project', fields: [['name', 'Name'], ['url', 'Link'], ['description', 'What it is, what you built, the outcome', 'text']] },
 };
 
-async function renderProfile() {
-  const p = await api('/api/profile');
+const FIELD_NAMES = { name: 'name', email: 'email', phone: 'phone', town: 'town', postcode: 'postcode', linkedin: 'LinkedIn', website: 'website', headline: 'headline', statement: 'about you', noticePeriod: 'notice period', clearance: 'clearance', drivingLicence: 'driving licence' };
+const COUNTED = { skills: ['skill', 'skills'], languages: ['language', 'languages'], experience: ['job', 'jobs'], education: ['qualification', 'qualifications'], certifications: ['certification', 'certifications'], projects: ['project', 'projects'] };
+// "email" → "email"; "2 experience" → "2 jobs"; "1 languages" → "1 language"
+const addedLabel = (a) => {
+  const m = /^(\d+) (\w+)$/.exec(a);
+  return m ? `${m[1]} ${COUNTED[m[2]]?.[+m[1] === 1 ? 0 : 1] || m[2]}` : FIELD_NAMES[a] || a;
+};
+const readBase64 = (file) => new Promise((resolve, reject) => {
+  const r = new FileReader();
+  r.onload = () => resolve(String(r.result).split(',')[1] || '');
+  r.onerror = () => reject(new Error(`Couldn't read ${file.name}.`));
+  r.readAsDataURL(file);
+});
+
+/** `imported` is a profile read from a CV or LinkedIn that hasn't been saved yet. */
+async function renderProfile(arg, imported) {
+  const p = imported?.profile || await api('/api/profile');
   const input = (key, label, opts = '') => `<div class="field"><label for="f-${key}">${label}</label><input id="f-${key}" data-key="${key}" value="${esc(p[key])}" ${opts}></div>`;
   view.innerHTML = `
     <h1>Your profile</h1>
     <p class="lede">Everything your CVs and cover letters are written from. The AI uses only what is here, so the more real detail (results, numbers, tools), the better the documents. A UK CV leaves out your photo, date of birth and marital status, so there's nowhere to put them.</p>
+    <div class="card stack" id="import">
+      <div><h2 style="margin:0">Fill this in from your CV</h2>
+      <p class="muted" style="margin:4px 0 0">Upload your CV and the AI copies it into the profile below for you to check. What you've already typed is kept; new jobs and qualifications are added.</p></div>
+      <div class="grid">
+        <div><label for="cvFile">Your CV (PDF, Word or text)</label><input id="cvFile" type="file" accept=".pdf,.docx,.txt,.md,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,text/plain"></div>
+        <div><label for="liUrl">LinkedIn profile address (optional)</label><input id="liUrl" type="url" inputmode="url" placeholder="linkedin.com/in/your-name" value="${esc(p.linkedin)}"></div>
+        <div><label for="liFile">LinkedIn profile as a PDF (optional)</label><input id="liFile" type="file" accept=".pdf,application/pdf"></div>
+      </div>
+      <details class="small muted"><summary>Why a PDF from LinkedIn, and how to get one</summary>
+        <p style="margin-top:6px">LinkedIn doesn't let other apps read profiles from a link, so your address is saved and put on your CVs, and the profile itself comes from LinkedIn's own export. On linkedin.com, open your profile, click <b>Resources</b> (or <b>More</b>), then <b>Save to PDF</b>, and choose that file here.</p></details>
+      <div class="row"><button type="button" class="primary" id="importGo" ${status.ai ? '' : 'title="Set up an AI model in Settings to read files"'}>Fill in my profile</button>
+        <span class="small muted">${status.ai ? `Read by ${esc(status.ai)}.` : 'Reading files needs an AI model (see <a href="#/settings">Settings</a>); a LinkedIn address alone works without one.'}</span></div>
+    </div>
+    ${imported ? `<div class="notice warn" id="importNotice"><b>Not saved yet.</b> Read from ${imported.read.length ? esc(imported.read.join(' and ')) : 'your LinkedIn address'}${imported.added.length ? `, adding ${esc(imported.added.map(addedLabel).join(', '))}` : ', but nothing new was found'}. Check everything below, fix anything it got wrong, then <b>Save profile</b>.</div>` : ''}
     <form id="profile" class="stack">
       <div class="card stack"><h2 style="margin-top:0">About you</h2>
         <div class="grid">${input('name', 'Full name')}${input('headline', 'Headline, e.g. Junior Software Engineer')}${input('email', 'Email', 'type="email"')}${input('phone', 'Phone')}
@@ -384,13 +413,25 @@ async function renderProfile() {
     $('#strength').textContent = `Profile ${Math.round((100 * checks.filter(Boolean).length) / checks.length)}% complete`;
   };
   strength();
+  $('#importGo').onclick = (e) => busy(e.target, 'Reading your CV (this can take a minute)', async () => {
+    const files = [];
+    for (const input of [$('#cvFile'), $('#liFile')]) {
+      const file = input.files[0];
+      if (!file) continue;
+      if (file.size > 10 * 1024 * 1024) throw new Error(`${file.name} is larger than 10 MB.`);
+      files.push({ name: file.name, data: await readBase64(file) });
+    }
+    const result = await api('/api/profile/import', { method: 'POST', body: { files, linkedin: $('#liUrl').value } });
+    await renderProfile(arg, result);
+    $('#importNotice').scrollIntoView({ block: 'center' });
+  });
   view$.onsubmit = (e) => {
     e.preventDefault();
     const body = { ...lists };
     $$('[data-key]', view$).forEach((el) => { body[el.dataset.key] = el.value.trim(); });
     $$('[data-list]', view$).forEach((el) => { body[el.dataset.list] = el.value.split('\n').map((s) => s.trim()).filter(Boolean); });
     body.drivingLicence = $('#f-drivingLicence').checked;
-    busy($('#saveProfile'), 'Saving', async () => { Object.assign(p, await api('/api/profile', { method: 'PUT', body })); Object.keys(SECTIONS).forEach((k) => { lists[k] = p[k]; drawSection(k); }); strength(); toast('Profile saved'); });
+    busy($('#saveProfile'), 'Saving', async () => { Object.assign(p, await api('/api/profile', { method: 'PUT', body })); Object.keys(SECTIONS).forEach((k) => { lists[k] = p[k]; drawSection(k); }); strength(); $('#importNotice')?.remove(); toast('Profile saved'); });
   };
 }
 

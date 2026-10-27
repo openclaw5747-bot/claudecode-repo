@@ -7,7 +7,8 @@ import { Store, STATUSES, newId } from './lib/store.js';
 import { SponsorRegister } from './lib/sponsors.js';
 import { reed, adzuna, searchAll } from './lib/sources.js';
 import { formatSalary, ukFlags } from './lib/salary.js';
-import { createProvider, analyse, tailor } from './lib/ai.js';
+import { createProvider, analyse, tailor, importProfile } from './lib/ai.js';
+import { readUpload, mergeProfile, linkedinUrl, MAX_UPLOAD_BYTES } from './lib/cv-import.js';
 import { assemble, cvHtml, letterHtml } from './lib/documents.js';
 
 try { process.loadEnvFile(); } catch {}
@@ -51,12 +52,12 @@ function send(res, status, body, headers = {}) {
   res.end(isJson ? JSON.stringify(body) : body);
 }
 
-async function readJson(req) {
+async function readJson(req, limit = 2_000_000) {
   let size = 0;
   const chunks = [];
   for await (const c of req) {
     size += c.length;
-    if (size > 2_000_000) throw new HttpError(413, 'That is too large.');
+    if (size > limit) throw new HttpError(413, 'That is too large.');
     chunks.push(c);
   }
   if (!chunks.length) return {};
@@ -131,6 +132,28 @@ route('PUT', /^\/api\/profile$/, async (req, res) => {
   }
   await store.update((d) => { d.profile = { ...d.profile, ...profile }; });
   send(res, 200, store.data.profile);
+});
+
+// Reads a CV and/or LinkedIn's PDF export into the profile. Nothing is saved: the merged profile goes
+// back to the page to be checked, and saved like any other edit.
+route('POST', /^\/api\/profile\/import$/, async (req, res) => {
+  const { files = [], linkedin } = await readJson(req, 3 * MAX_UPLOAD_BYTES);
+  let link;
+  try { link = linkedinUrl(linkedin); } catch (err) { throw new HttpError(400, err.message); }
+  if (!files.length && !link) throw new HttpError(400, 'Choose your CV, or add your LinkedIn address.');
+  if (files.length > 3) throw new HttpError(400, 'Up to three files at a time.');
+  const documents = [];
+  for (const f of files) {
+    try { documents.push(await readUpload(String(f.name || 'file'), Buffer.from(String(f.data || ''), 'base64'))); }
+    catch (err) { throw new HttpError(400, err.message); }
+  }
+  let found = { linkedin: link };
+  if (documents.length) {
+    needAi();
+    found = await ai(() => importProfile(provider, documents, link));
+    if (link) found.linkedin = link;
+  }
+  send(res, 200, { ...mergeProfile(store.data.profile, found), read: documents.map((d) => d.name) });
 });
 
 route('GET', /^\/api\/jobs$/, async (req, res, url) => {

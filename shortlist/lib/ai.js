@@ -42,6 +42,36 @@ export const TailoredSchema = z.object({
   gaps: z.array(z.string()).describe('Requirements the profile does not show and that the documents therefore do not claim'),
 });
 
+const month = () => z.string().describe('YYYY-MM, or YYYY if only the year is given; empty if not given (for an end date, empty means it is current)');
+
+export const ImportedProfileSchema = z.object({
+  name: z.string(), email: z.string(), phone: z.string(),
+  town: z.string().describe('Town or city only, never a full street address'),
+  postcode: z.string().describe('Only the outward part, e.g. "LS6", or empty'),
+  linkedin: z.string(), website: z.string(),
+  headline: z.string().describe('Their current or target job title, e.g. "Junior Software Engineer"'),
+  statement: z.string().describe('Their own summary or personal statement, close to their words; empty if there is none'),
+  skills: z.array(z.string()).describe('Skills, tools and technologies, one per item, as they wrote them'),
+  languages: z.array(z.string()).describe('Spoken languages with level, e.g. "Polish (native)"'),
+  drivingLicence: z.boolean().describe('true only if they say they hold a driving licence'),
+  noticePeriod: z.string(), clearance: z.string().describe('Security clearance they hold, e.g. "SC", or empty'),
+  experience: z.array(z.object({
+    title: z.string(), employer: z.string(), location: z.string(), start: month(), end: month(),
+    achievements: z.array(z.string()).describe('What they did and achieved in this role, one per item, close to their words'),
+  })).describe('Jobs, placements, internships and volunteering, most recent first'),
+  education: z.array(z.object({
+    qualification: z.string().describe('e.g. "BSc (Hons) Computer Science", "A levels", "GCSEs"'),
+    institution: z.string(), grade: z.string().describe('e.g. "2:1", "AAB", "9 GCSEs grades 9–6"; empty if not given'),
+    start: month(), end: month(), details: z.string(),
+  })),
+  certifications: z.array(z.object({ name: z.string(), issuer: z.string(), year: z.string() })),
+  projects: z.array(z.object({ name: z.string(), url: z.string(), description: z.string() })),
+});
+
+const IMPORT_PROMPT = `These are the candidate's own documents: a CV and/or a PDF export of their LinkedIn profile. Read them into profile fields.
+
+Copy what is there; don't improve, summarise away or add to it. Leave a field empty (or a list empty) when the documents don't say. Where two documents describe the same job, give it once with everything both say. Leave out date of birth, age, marital status, nationality, photos and full street addresses.`;
+
 const RULES = `You help a job seeker in the United Kingdom apply for jobs.
 
 Write in British English (organise, programme, licence as a noun, CV not resume, "per annum"), with UK conventions:
@@ -78,7 +108,12 @@ class AnthropicProvider {
     this.label = `Claude (${this.model})`;
   }
 
-  async json(schema, prompt) {
+  async json(schema, prompt, { documents = [] } = {}) {
+    // Claude reads PDFs directly, layout included; other files go in as text.
+    const content = [
+      ...documents.filter((d) => d.kind === 'pdf').map((d) => ({ type: 'document', title: d.name, source: { type: 'base64', media_type: 'application/pdf', data: d.pdf } })),
+      { type: 'text', text: withTextDocuments(prompt, documents.filter((d) => d.kind !== 'pdf')) },
+    ];
     const res = await this.client.beta.messages.parse({
       model: this.model,
       max_tokens: 16000,
@@ -87,10 +122,10 @@ class AnthropicProvider {
       fallbacks: 'default',
       output_config: { format: betaZodOutputFormat(schema), effort: 'medium' },
       system: RULES,
-      messages: [{ role: 'user', content: prompt }],
+      messages: [{ role: 'user', content }],
     });
     if (res.stop_reason === 'refusal') throw new Error('The model declined this request.');
-    if (res.stop_reason === 'max_tokens') throw new Error('The answer was cut off; try a shorter posting.');
+    if (res.stop_reason === 'max_tokens') throw new Error('The answer was cut off; try a shorter document.');
     if (!res.parsed_output) throw new Error('The model returned something that is not the expected JSON.');
     return res.parsed_output;
   }
@@ -105,7 +140,10 @@ class OllamaProvider {
     this.label = `Ollama (${model})`;
   }
 
-  async json(schema, prompt) {
+  async json(schema, prompt, { documents = [] } = {}) {
+    const unreadable = documents.find((d) => !d.text);
+    if (unreadable) throw new Error(`${unreadable.name} has no text a local model can read (is it a scan?). Try a Word or text copy.`);
+    prompt = withTextDocuments(prompt, documents);
     const res = await this.fetch(`${this.url}/api/chat`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -127,6 +165,11 @@ class OllamaProvider {
   }
 }
 
+function withTextDocuments(prompt, documents) {
+  if (!documents.length) return prompt;
+  return `${documents.map((d) => `<document name="${d.name.replace(/"/g, '')}">\n${d.text}\n</document>`).join('\n\n')}\n\n${prompt}`;
+}
+
 export function createProvider(env) {
   const kind = (env.AI_PROVIDER || (env.ANTHROPIC_API_KEY ? 'anthropic' : 'ollama')).toLowerCase();
   if (kind === 'ollama') return env.OLLAMA_MODEL ? new OllamaProvider({ url: env.OLLAMA_URL, model: env.OLLAMA_MODEL }) : null;
@@ -137,3 +180,5 @@ export function createProvider(env) {
 export const analyse = (provider, profile, posting) => provider.json(AnalysisSchema, analysePrompt(profile, posting));
 export const tailor = (provider, profile, posting, analysis, { tone, instruction } = {}) =>
   provider.json(TailoredSchema, tailorPrompt(profile, posting, analysis, tone, instruction));
+export const importProfile = (provider, documents, linkedin) =>
+  provider.json(ImportedProfileSchema, `${IMPORT_PROMPT}${linkedin ? `\n\nTheir LinkedIn address is ${linkedin}.` : ''}`, { documents });

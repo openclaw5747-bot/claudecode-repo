@@ -3,6 +3,7 @@
 A job search companion for the UK that runs on your own computer. Inspired by
 [Dossier](https://github.com/AienTech/dossier), it is rebuilt around how hiring works in the UK.
 
+- **Start from your CV.** Upload your CV (PDF, Word or text) and add your LinkedIn address, and the AI fills in your profile for you to check before saving. What you've already typed is kept, and new jobs and qualifications are added. LinkedIn doesn't let other apps read profiles from a link, so the address is saved and printed on your CVs; to bring your LinkedIn profile in too, use LinkedIn's **Save to PDF** and upload that file as well.
 - **Find UK jobs.** Searches [Reed](https://www.reed.co.uk/developers/jobseeker) and [Adzuna](https://developer.adzuna.com/) at once, by town, city or postcode and distance in miles. It shows pay in £ (a year, a day or an hour) and flags IR35, security clearance, DBS checks, driving licences, hybrid and remote work. For NHS Jobs, Civil Service Jobs, LinkedIn or any careers page, paste the advert.
 - **Visa sponsor check.** Checks every employer against the Home Office [register of licensed sponsors](https://www.gov.uk/government/publications/register-of-licensed-sponsors-workers), downloaded from GOV.UK and refreshed daily. It matches trading names too (the register lists "Roofoods Ltd t/a Deliveroo"). One switch hides employers that can't sponsor you, or that say they won't.
 - **See how you match.** Reads the advert against your profile: each requirement (essential or desirable), whether you meet it, the evidence, and the UK points to check.
@@ -31,7 +32,7 @@ Set up in `.env`:
 | A password (needed if anyone else can reach it) | `SHORTLIST_PASSWORD` |
 | Where it listens | `HOST` (default `127.0.0.1`), `PORT` (default `3000`), `SHORTLIST_DATA` (default `./data`) |
 
-Then fill in **Profile**. The more real detail you give (results, numbers, tools), the better the documents. After that, find a job or paste an advert, match it, and write your documents.
+Then fill in **Profile**, or upload your CV there to fill it in for you. The more real detail you give (results, numbers, tools), the better the documents. After that, find a job or paste an advert, match it, and write your documents.
 
 Using Claude sends your profile and the advert to Anthropic's API. Using Ollama keeps everything on your machine; a model of about 14B parameters or more follows the format reliably.
 
@@ -50,6 +51,7 @@ npm test
 | `lib/sponsors.js` | Downloads, parses and searches the sponsor register |
 | `lib/salary.js` | £ formatting, day and hourly rates, UK flags in advert text |
 | `lib/ai.js` | Prompts and schemas; Claude or Ollama |
+| `lib/cv-import.js` | Reads uploaded CVs (PDF, Word, text) and merges what the AI found into the profile |
 | `lib/documents.js` | Builds the CV, letter and email from your profile, checks what the AI wrote, renders A4 pages |
 | `lib/store.js` | The JSON file, written safely |
 | `public/` | The web app (no build step) |
