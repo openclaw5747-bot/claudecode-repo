@@ -20,3 +20,9 @@ You can also just say "research X" and Claude will pick up the skill.
 Files:
 - `.claude/skills/research/SKILL.md` — the orchestrator (plan → parallel agents → verify → report).
 - `.claude/agents/source-researcher.md` — the per-source research subagent.
+
+## LinkedIn → X auto-repurposer
+
+`linkedin-to-x/` is a Cloudflare Worker that turns each LinkedIn post you publish
+via Typefully into an X post queued in Typefully's next free slot. See
+[`linkedin-to-x/README.md`](linkedin-to-x/README.md) for setup.
