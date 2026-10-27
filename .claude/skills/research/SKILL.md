@@ -14,6 +14,22 @@ Flags (optional, anywhere in the arguments):
 - `--deep` — use 7 lanes and 2 agents for the web lane (more thorough, more tokens).
 - `--save` — also write the report to `research/<YYYY-MM-DD>-<topic-slug>.md`.
 
+## Step 0 — Check that pages can be opened
+
+Before planning, do one `WebFetch` of `https://en.wikipedia.org/wiki/Main_Page`
+(prompt: "Return the page title").
+
+- If it works, continue.
+- If it fails (DNS error, 403, "CONNECT tunnel failed", network/egress blocked), the
+  cloud environment's network access is restricted: web search still works, but the
+  agents cannot open pages. Stop and tell the user, in plain non-technical words:
+  "Your session's network setting blocks websites, so I can only see search snippets.
+  To fix it: click the environment name at the top of the session → Edit → set
+  Network access to Full → start a new session. Guide:
+  https://code.claude.com/docs/en/cloud-environments#network-access.
+  Want me to go ahead anyway using search snippets only?"
+  Continue only if they say yes, and then label the report as snippet-based.
+
 ## Step 1 — Plan (do this yourself, briefly)
 
 1. Restate the topic as one clear research question.
