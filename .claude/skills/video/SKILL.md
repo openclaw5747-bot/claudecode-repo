@@ -41,10 +41,13 @@ python3 tools/video/transcribe.py "<url-or-path>" [--out DIR] [--lang xx]
 ```
 
 It tries published captions, then (YouTube) the transcript API, then downloads
-the audio and runs faster-whisper locally. Whisper on CPU takes roughly a third to
-half of the video's length with the default `small` model; for videos over ~45 minutes, pass
-`--model base` (faster, a bit less accurate) and run it in the background, and tell
-the user it will take a few minutes.
+the audio and runs faster-whisper locally. With the right language, Whisper (`small` model) runs at about 1/6 of the
+video's length on a 4-core cloud session, so a 3-minute clip takes about 30 seconds and a 20-minute talk about 3–4
+minutes. For videos over ~45 minutes, pass `--model base` (faster, slightly less
+accurate) and run it in the background. The language comes from `--lang`, then
+`$VIDEO_LANG`, then the site's own label, and is otherwise detected. Detection can
+misfire on old or echoey recordings (English heard as Welsh, for example), which makes the
+transcript garbled *and* several times slower. If the language comes out wrong, re-run with `--lang xx`.
 
 Whisper runs locally in this session, including in cloud sessions, so it needs no
 API key. Only *downloading* can be blocked.

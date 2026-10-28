@@ -209,13 +209,32 @@ def load_pcm(audio):
     return np.frombuffer(p.stdout, dtype=np.float32)
 
 
+def detect_lang(model, pcm, sr=16000):
+    """Vote over 30s windows at 20/50/80% of the audio. Whisper's default looks
+    only at the start, which is often applause or music, and guessed the wrong
+    language on a TED talk."""
+    votes = {}
+    for frac in (0.2, 0.5, 0.8):
+        start = int(len(pcm) * frac)
+        chunk = pcm[start:start + 30 * sr]
+        if len(chunk) < 5 * sr:
+            chunk = pcm[:30 * sr]
+        code, prob, _ = model.detect_language(chunk)
+        votes[code] = votes.get(code, 0) + prob
+    lang = max(votes, key=votes.get)
+    log(f"detected language: {lang}")
+    return lang
+
+
 def whisper(audio, model_name, lang):
     from faster_whisper import WhisperModel
     log(f"transcribing with faster-whisper '{model_name}' (CPU) - this can take a while")
     model = WhisperModel(model_name, device="cpu", compute_type="int8",
                          cpu_threads=os.cpu_count() or 4)
-    segments, info = model.transcribe(load_pcm(audio), language=lang or None, vad_filter=True,
-                                      beam_size=1)
+    pcm = load_pcm(audio)
+    if not lang:
+        lang = detect_lang(model, pcm)
+    segments, info = model.transcribe(pcm, language=lang, vad_filter=True, beam_size=1)
     segs, last_report = [], time.time()
     for s in segments:
         segs.append((s.start, s.text.strip()))
@@ -315,7 +334,8 @@ def main():
     ap.add_argument("--out", help="output directory (default: videos/<date>-<title-slug>)")
     ap.add_argument("--model", default=os.environ.get("WHISPER_MODEL", "small"),
                     help="faster-whisper model: tiny|base|small|medium|large-v3 (default small)")
-    ap.add_argument("--lang", default=None, help="preferred language code, e.g. en")
+    ap.add_argument("--lang", default=os.environ.get("VIDEO_LANG"),
+                    help="language code, e.g. en (default: $VIDEO_LANG, the site's label, else detect)")
     ap.add_argument("--cookies", default=os.environ.get("VIDEO_COOKIES"))
     ap.add_argument("--force-whisper", action="store_true", help="skip captions, always transcribe audio")
     ap.add_argument("--frames", choices=["auto", "yes", "no"], default="auto",
@@ -347,7 +367,8 @@ def main():
                         "(--cookies / VIDEO_COOKIES), run locally instead of in the cloud, or upload the "
                         "video/audio file and pass its path.")
                 sys.exit(2)
-            segs, source = whisper(audio, args.model, args.lang)
+            site_lang = (meta.get("language") or "").split("-")[0] or None
+            segs, source = whisper(audio, args.model, args.lang or site_lang)
 
         if args.out:
             out = Path(args.out)
