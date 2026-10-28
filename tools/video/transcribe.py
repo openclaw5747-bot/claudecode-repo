@@ -225,6 +225,42 @@ def whisper(audio, model_name, lang):
     return segs, f"whisper:{model_name}:{info.language}"
 
 
+# --- frames (for on-screen text / visuals) ----------------------------------
+
+def extract_frames(url, cookies, work, out, duration, max_frames=16):
+    """Save evenly spaced JPEG frames to <out>/frames so Claude can read on-screen
+    text and see the visuals. Reels and Shorts often carry their message there."""
+    src = url if (os.path.exists(url) or Path(urlparse(url).path).suffix.lower() in MEDIA_EXTS) else None
+    if not src:
+        log("downloading video for frames")
+        p = run(ytdlp_base(cookies) + ["-f", "bv*[height<=720]+ba/b[height<=720]/bv*+ba/b",
+                                        "--merge-output-format", "mp4",
+                                        "-o", str(Path(work) / "video.%(ext)s"), url], timeout=1800)
+        files = glob.glob(str(Path(work) / "video.*"))
+        if p.returncode != 0 or not files:
+            log("could not download video for frames")
+            return 0
+        src = files[0]
+    if not duration:
+        p = run(["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0", src], timeout=60)
+        try:
+            duration = float(p.stdout.strip())
+        except ValueError:
+            duration = 60
+    step = max(duration / max_frames, 1.5)
+    fdir = out / "frames"
+    fdir.mkdir(parents=True, exist_ok=True)
+    for f in fdir.glob("*.jpg"):
+        f.unlink()
+    p = run(["ffmpeg", "-loglevel", "error", "-y", "-i", src, "-vf", f"fps=1/{step:.3f},scale=720:-2",
+             "-q:v", "4", "-frames:v", str(max_frames), str(fdir / "f%03d.jpg")], timeout=900)
+    frames = sorted(fdir.glob("*.jpg"))
+    for i, f in enumerate(frames):  # name frames by timestamp
+        f.rename(fdir / f"frame_{fmt_ts(i * step).replace(':', '-')}.jpg")
+    log(f"saved {len(frames)} frames to {fdir}")
+    return len(frames)
+
+
 # --- output -----------------------------------------------------------------
 
 def paragraphs(segs, every=60):
@@ -242,7 +278,7 @@ def paragraphs(segs, every=60):
     return [(s, re.sub(r"\s+", " ", p).strip()) for s, p in paras]
 
 
-def write_outputs(out, url, meta, segs, source):
+def write_outputs(out, url, meta, segs, source, n_frames=0):
     out.mkdir(parents=True, exist_ok=True)
     title = meta.get("title") or url
     paras = paragraphs(segs)
@@ -255,15 +291,20 @@ def write_outputs(out, url, meta, segs, source):
                 break
     if meta.get("duration"):
         head.append(f"- Duration: {fmt_ts(meta['duration'])}")
-    head += [f"- Transcript source: {source}", f"- Words: {words}", ""]
+    head += [f"- Transcript source: {source}", f"- Words: {words}"]
+    if n_frames:
+        head.append(f"- Frames: {n_frames} stills in frames/ (read them for on-screen text and visuals)")
+    head.append("")
+    if meta.get("description"):
+        head += ["## Description", "", meta["description"].strip(), ""]
     if meta.get("chapters"):
         head += ["## Chapters", ""] + [f"- [{fmt_ts(c['start'])}] {c['title']}" for c in meta["chapters"]] + [""]
     head += ["## Transcript", ""]
-    body = [f"[{fmt_ts(s)}] {p}\n" for s, p in paras]
+    body = [f"[{fmt_ts(s)}] {p}\n" for s, p in paras] or ["(No speech detected: music-only or silent. See frames/ and the description.)\n"]
     (out / "transcript.md").write_text("\n".join(head) + "\n" + "\n".join(body), encoding="utf-8")
     (out / "transcript.txt").write_text("\n\n".join(p for _, p in paras) + "\n", encoding="utf-8")
     clean = {k: v for k, v in meta.items() if not k.startswith("_")}
-    clean.update(url=url, transcript_source=source, words=words)
+    clean.update(url=url, transcript_source=source, words=words, frames=n_frames)
     (out / "meta.json").write_text(json.dumps(clean, indent=2, ensure_ascii=False), encoding="utf-8")
     return words
 
@@ -277,6 +318,8 @@ def main():
     ap.add_argument("--lang", default=None, help="preferred language code, e.g. en")
     ap.add_argument("--cookies", default=os.environ.get("VIDEO_COOKIES"))
     ap.add_argument("--force-whisper", action="store_true", help="skip captions, always transcribe audio")
+    ap.add_argument("--frames", choices=["auto", "yes", "no"], default="auto",
+                    help="save stills for on-screen text (auto: videos <= 3 min, or no speech found)")
     args = ap.parse_args()
 
     if args.cookies and not os.path.exists(args.cookies):
@@ -306,15 +349,19 @@ def main():
                 sys.exit(2)
             segs, source = whisper(audio, args.model, args.lang)
 
-    if not segs:
-        log("FAILED: transcript came back empty (silent or music-only video?)")
-        sys.exit(3)
+        if args.out:
+            out = Path(args.out)
+        else:
+            slug = slugify(meta.get("title") or vid or urlparse(args.url).path)
+            out = Path("videos") / f"{time.strftime('%Y-%m-%d')}-{slug}"
+        duration = meta.get("duration")
+        want_frames = args.frames == "yes" or (args.frames == "auto" and (not segs or (duration or 0) <= 180))
+        n_frames = extract_frames(args.url, args.cookies, work, out, duration) if want_frames else 0
 
-    if args.out:
-        out = Path(args.out)
-    else:
-        out = Path("videos") / f"{time.strftime('%Y-%m-%d')}-{slugify(meta.get('title') or vid or urlparse(args.url).path)}"
-    words = write_outputs(out, args.url, meta, segs, source)
+    if not segs and not n_frames:
+        log("FAILED: no speech found and no frames could be saved")
+        sys.exit(3)
+    words = write_outputs(out, args.url, meta, segs or [], source, n_frames)
     log(f"done: {words} words via {source}")
     print(out)
 

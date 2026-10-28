@@ -40,6 +40,14 @@ transcript API → download audio and transcribe locally with faster-whisper. Th
 covers YouTube, TED, X, TikTok, podcasts, direct media files, uploaded files and the
 other ~1,800 sites yt-dlp supports.
 
+Whisper runs inside the session, cloud included, with no API key. For short videos
+(Instagram reels, TikToks, Shorts) and music-only ones, the tool also saves still
+frames so Claude can read on-screen text and describe what's shown.
+
+**Instagram:** public reels usually work as-is (tested). Private posts, or
+Instagram refusing the server ("empty media response"), need a `cookies.txt` from a
+logged-in browser, or upload the reel file.
+
 **YouTube from cloud sessions:** YouTube blocks most cloud servers ("confirm you're
 not a bot"). Upload the file, pass a browser-exported `cookies.txt`
 (`--cookies` or `VIDEO_COOKIES`, git-ignored), or run Claude Code locally.

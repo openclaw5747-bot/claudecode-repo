@@ -46,8 +46,14 @@ half of the video's length with the default `small` model; for videos over ~45 m
 `--model base` (faster, a bit less accurate) and run it in the background, and tell
 the user it will take a few minutes.
 
+Whisper runs locally in this session, including in cloud sessions, so it needs no
+API key. Only *downloading* can be blocked.
+
 The last stdout line is the output directory, containing `transcript.md`
-(metadata, chapters, timestamped paragraphs), `transcript.txt` and `meta.json`.
+(metadata, description, chapters, timestamped paragraphs), `transcript.txt`,
+`meta.json` and, for short videos (3 minutes or less) or ones with no speech, `frames/`. That
+folder holds up to 16 evenly spaced stills named by timestamp. Use `--frames yes` to
+force frames for longer videos, or `--frames no` to skip them.
 
 **If it fails** (exit code 2), the site blocked this machine or needs a login.
 YouTube in particular blocks most cloud servers. Tell the user plainly and offer:
@@ -57,14 +63,23 @@ YouTube in particular blocks most cloud servers. Tell the user plainly and offer
    `VIDEO_COOKIES=<path>`. Remind them that the file holds their login session,
    so they should keep it out of git.
 3. Run this skill from Claude Code on their own computer, where their home IP usually isn't blocked.
+   For Instagram, also check that the post is public. Private accounts always need cookies,
+   and Instagram sometimes refuses cloud servers even for public reels.
 4. Paste the transcript (YouTube: "..." → "Show transcript").
 Do not pretend to know the video's contents from its title.
 
-## Step 2 — Read the transcript
+## Step 2 — Read the transcript (and frames)
 
 Read `transcript.md` in full. For long transcripts, more than about 15k words, read
 it in chunks and keep running notes. Watch for speaker changes, caption errors (fix
 obvious ones from context), and the chapter list.
+
+If `frames/` exists, **look at the frames** (Read each image). Reels, Shorts and
+TikToks often carry the message as on-screen text over music. Read that text and
+note what's shown, using the frame name as the timestamp. Treat the post's description
+(caption and hashtags) as part of the content. If there's no speech, say so and base
+the output on the on-screen text, visuals and description. Ignore lone Whisper
+hallucinations on music such as "Thank you for watching!".
 
 ## Step 3 — Produce the output
 
