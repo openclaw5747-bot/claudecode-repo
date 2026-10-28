@@ -1,0 +1,3 @@
+yt-dlp[default,curl-cffi]
+youtube-transcript-api
+faster-whisper
